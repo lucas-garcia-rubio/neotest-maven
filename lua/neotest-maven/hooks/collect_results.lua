@@ -74,7 +74,7 @@ local function is_parameterized_test(test_case_node)
 	return function_name:match(parameterized_test_pattern) ~= nil
 end
 
-local function extract_test_case_name(test_case_node)
+local function extract_test_case_basename(test_case_node)
 	local function_name = test_case_node._attr.name
 	return function_name:match("^(.-)%(")
 end
@@ -116,8 +116,6 @@ local function write_systemout_to_file(test_case_node, results_directory)
 	local parent_path = reports_dir:match("(.+)/[^/]+")
 	local neotest_output_files = parent_path .. "/neotest-output"
 
-	print("test_case_node name: ", test_case_node["_attr"]["name"])
-
 	vim.uv.fs_mkdir(neotest_output_files, tonumber("755", 8))
 
 	local path_to_file = neotest_output_files .. "/" .. filename
@@ -130,6 +128,64 @@ local function write_systemout_to_file(test_case_node, results_directory)
 	end
 
 	return path_to_file
+end
+
+local function get_parameter_number(test_case_node)
+	local function_name = test_case_node._attr.name
+	return function_name:match("%[(.+)%]")
+end
+
+local function write_output_for_parameterized_tests(test_case_node, results_directory)
+	local test_case_node_name = extract_test_case_basename(test_case_node)
+	print("filename base parameterized: ", test_case_node_name)
+	local filename = test_case_node["_attr"]["classname"] .. "#" .. test_case_node_name .. "-output.txt"
+	local reports_dir = results_directory:match("([^:]+)")
+	local parent_path = reports_dir:match("(.+)/[^/]+")
+	local neotest_output_files = parent_path .. "/neotest-output"
+
+	local test_number = tonumber(get_parameter_number(test_case_node))
+	local failure_node = test_case_node.failure
+	local status = failure_node == nil and STATUS_PASSED or STATUS_FAILED
+
+	print("test_number: ", test_number)
+
+	vim.uv.fs_mkdir(neotest_output_files, tonumber("755", 8))
+
+	local path_to_file = neotest_output_files .. "/" .. filename
+
+	local file
+	if test_number == 1 then
+		file = io.open(path_to_file, "w")
+	else
+		file = io.open(path_to_file, "a")
+	end
+
+	if file then
+		file:write("Parameter #" .. test_number .. " - Test " .. status .. "\n\n")
+		file:write(test_case_node["system-out"])
+		file:write("\n\n")
+		file:close()
+	else
+		print("Error: Could not open file for writing.")
+	end
+
+	return path_to_file
+end
+
+--- Check if the current status of the test is already failed.
+--- If it is, it returns failed since the test cannot be passed anymore.
+--- Otherwise, return the status of the current test.
+---@param test_case_node table
+---@param table_tests table
+---@return string
+local function get_status_for_parameterized(test_case_node, table_tests)
+	local test_case_node_name = extract_test_case_basename(test_case_node)
+	if table_tests[test_case_node_name].status == STATUS_FAILED then
+		return STATUS_FAILED
+	else
+		local failure_node = test_case_node.failure
+		return failure_node == nil and STATUS_PASSED or STATUS_FAILED
+	end
 end
 
 --- See Neotest adapter specification.
@@ -156,18 +212,32 @@ return function(build_specfication, _, tree)
 				local is_parameterized = is_parameterized_test(test_case_node)
 				local matched_position = find_position_for_test_case(tree, test_case_node)
 
-				if is_parameterized then
-					local test_case_node_name = extract_test_case_name(test_case_node)
-					parameterized_tests[test_case_node_name] = {
-						status = STATUS_PASSED,
-						output = "", -- TODO: criar método para escrever output de testes parametrizados
-						short = nil,
-						errors = {},
-					}
-					matched_position = find_position_for_test_case(tree, test_case_node)
-				end
+				if is_parameterized and matched_position ~= nil then
+					local test_case_node_name = extract_test_case_basename(test_case_node)
+					print("basename: ", test_case_node_name)
+					local number = tonumber(get_parameter_number(test_case_node))
+					if number == 1 then
+						print("entrou no if: ", number)
+						local failure_node = test_case_node.failure
+						local status = failure_node == nil and STATUS_PASSED or STATUS_FAILED
+						parameterized_tests[test_case_node_name] = {
+							status = status,
+							output = write_output_for_parameterized_tests(test_case_node, results_directory),
+							short = nil,
+							errors = {},
+						}
+					else
+						print("entrou no else: ", number)
+						parameterized_tests[test_case_node_name] = {
+							status = get_status_for_parameterized(test_case_node, parameterized_tests),
+							output = write_output_for_parameterized_tests(test_case_node, results_directory),
+							short = nil,
+							errors = {},
+						}
+					end
 
-				if matched_position ~= nil then
+					results[matched_position.id] = parameterized_tests[test_case_node_name]
+				elseif matched_position ~= nil then
 					local path_to_file = write_systemout_to_file(test_case_node, results_directory)
 					local failure_node = test_case_node.failure
 					local status = failure_node == nil and STATUS_PASSED or STATUS_FAILED

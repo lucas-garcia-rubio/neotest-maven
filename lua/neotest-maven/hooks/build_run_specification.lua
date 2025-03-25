@@ -89,10 +89,10 @@ local function build_maven_command(position)
 		local classname = filename:gsub("%.java", "")
 		if classname:find("IT") then
 			table.insert(command, "-Dit.test='" .. classname .. "*'")
-			table.insert(command, "verify")
+			table.insert(command, "failsafe:integration-test")
 		else
 			table.insert(command, "-Dtest='" .. classname .. "*'")
-			table.insert(command, "test")
+			table.insert(command, "surefire:test")
 		end
 		return command
 	elseif position.type == "test" then
@@ -104,10 +104,10 @@ local function build_maven_command(position)
 
 		if classname:find("IT") then
 			table.insert(command, "-Dit.test='" .. classname_with_test .. "'")
-			table.insert(command, "verify")
+			table.insert(command, "failsafe:integration-test")
 		else
 			table.insert(command, "-Dtest='" .. classname_with_test .. "'")
-			table.insert(command, "test")
+			table.insert(command, "surefire:test")
 		end
 		return command
 	elseif position.type == "dir" then
