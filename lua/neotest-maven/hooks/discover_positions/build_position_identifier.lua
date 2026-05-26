@@ -38,7 +38,5 @@ return function(position, parents)
 	local package_name = get_package_name(position.path)
 	local namespace_name = get_namespace_name(parents)
 	local position_name = get_clean_position_name(position.handle_name)
-	local var = package_name .. "." .. namespace_name .. position_name
-	print("position_identifier: ", var)
 	return package_name .. "." .. namespace_name .. position_name
 end

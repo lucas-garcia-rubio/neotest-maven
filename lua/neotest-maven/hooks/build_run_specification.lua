@@ -1,6 +1,4 @@
-local lib = require("neotest.lib")
 local find_project_directory = require("neotest-maven.hooks.find_project_directory")
-local printTable = require("neotest-maven.utils.print-table").printTable
 
 --- Fiends either an executable file named `gradlew` in any parent directory of
 --- the project or falls back to a binary called `gradle` that must be available
@@ -30,54 +28,6 @@ local function get_test_results_directory(project_directory, position)
 		end
 	end
 	return project_directory .. "/target/failsafe-reports" .. ":" .. project_directory .. "/target/surefire-reports"
-end
-
---- Takes a NeoTest tree object and iterate over its positions. For each position
---- it traverses up the tree to find the respective namespace that can be
---- used to filter the tests on execution. The namespace is usually the parent
---- test class.
----
---- @param tree table - see neotest.Tree
---- @return  table[] - list of neotest.Position of `type = "namespace"`
-local function get_namespaces_of_tree(tree)
-	local namespaces = {}
-
-	for _, position in tree:iter() do
-		if position.type == "namespace" then
-			table.insert(namespaces, position)
-		end
-	end
-
-	return namespaces
-end
-
---- Constructs the additional arguments for the test command to filter the
---- correct tests that should run.
---- Therefore it uses (and possibly repeats) the Gradle test command
---- option `--tests` with the full locator. The locators consist of the
---- package path, plus optional class names and test function name. This value is
---- already attached/pre-calculated to the nodes `id` property in the tree.
---- The position argument defines what the user intended to execute, which can
---- also be a whole file. In that case the paths are unknown and must be
---- collected by some additional logic.
----
---- @param tree table - see neotest.Tree
---- @param position table - see neotest.Position
---- @return string[] - list of strings for arguments
-local function get_test_filter_arguments(tree, position)
-	local arguments = {}
-
-	if position.type == "test" or position.type == "namespace" then
-		vim.list_extend(arguments, { "--tests", "'" .. position.id .. "'" })
-	elseif position.type == "file" then
-		local namespaces = get_namespaces_of_tree(tree)
-
-		for _, namespace in pairs(namespaces) do
-			vim.list_extend(arguments, { "--tests", "'" .. namespace.id .. "'" })
-		end
-	end
-
-	return arguments
 end
 
 --- @param position table
@@ -135,8 +85,5 @@ return function(arguments)
 	local context = {}
 	context.test_results_directory = get_test_results_directory(project_directory, position)
 	local returnable = { command = table.concat(command, " "), context = context }
-	print("returnable: ")
-	printTable(returnable)
-	print("+++++++++++++++++++++")
 	return returnable
 end

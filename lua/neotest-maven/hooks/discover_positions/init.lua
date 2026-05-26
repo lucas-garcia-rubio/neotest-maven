@@ -1,7 +1,6 @@
 local lib = require("neotest.lib")
 local filetype = require("plenary.filetype")
 local position_queries = require("neotest-maven.position_queries")
-local printTable = require("neotest-maven.utils.print-table").printTable
 
 --- See Neotest adapter specification.
 ---
@@ -25,8 +24,6 @@ return function(path)
 		build_position = 'require("neotest-maven.hooks.discover_positions.build_position")',
 		position_id = 'require("neotest-maven.hooks.discover_positions.build_position_identifier")',
 	})
-
-	-- TODO: implementar logging level
 
 	return returnable
 end

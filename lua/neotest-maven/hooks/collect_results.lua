@@ -1,6 +1,5 @@
 local lib = require("neotest.lib")
 local xml = require("neotest.lib.xml")
-local printTable = require("neotest-maven.utils.print-table").printTable
 local get_package_name = require("neotest-maven.hooks.shared_utilities").get_package_name
 
 local XML_FILE_SUFFIX = ".xml"
@@ -58,7 +57,6 @@ local function find_position_for_test_case(tree, test_case_node)
 	print("package_and_class: ", package_and_class)
 
 	for _, position in tree:iter() do
-		-- if position.name == function_name and vim.startswith(position.id, package_and_class) then
 		if vim.startswith(function_name, position.name) and vim.startswith(position.id, package_and_class) then
 			return position
 		end
@@ -137,7 +135,6 @@ end
 
 local function write_output_for_parameterized_tests(test_case_node, results_directory)
 	local test_case_node_name = extract_test_case_basename(test_case_node)
-	print("filename base parameterized: ", test_case_node_name)
 	local filename = test_case_node["_attr"]["classname"] .. "#" .. test_case_node_name .. "-output.txt"
 	local reports_dir = results_directory:match("([^:]+)")
 	local parent_path = reports_dir:match("(.+)/[^/]+")
@@ -146,8 +143,6 @@ local function write_output_for_parameterized_tests(test_case_node, results_dire
 	local test_number = tonumber(get_parameter_number(test_case_node))
 	local failure_node = test_case_node.failure
 	local status = failure_node == nil and STATUS_PASSED or STATUS_FAILED
-
-	print("test_number: ", test_number)
 
 	vim.uv.fs_mkdir(neotest_output_files, tonumber("755", 8))
 
@@ -214,11 +209,12 @@ return function(build_specfication, _, tree)
 
 				if is_parameterized and matched_position ~= nil then
 					local test_case_node_name = extract_test_case_basename(test_case_node)
-					print("basename: ", test_case_node_name)
 					local number = tonumber(get_parameter_number(test_case_node))
 					if number == 1 then
-						print("entrou no if: ", number)
 						local failure_node = test_case_node.failure
+						if failure_node == nil then
+							failure_node = test_case_node.error
+						end
 						local status = failure_node == nil and STATUS_PASSED or STATUS_FAILED
 						parameterized_tests[test_case_node_name] = {
 							status = status,
@@ -227,7 +223,6 @@ return function(build_specfication, _, tree)
 							errors = {},
 						}
 					else
-						print("entrou no else: ", number)
 						parameterized_tests[test_case_node_name] = {
 							status = get_status_for_parameterized(test_case_node, parameterized_tests),
 							output = write_output_for_parameterized_tests(test_case_node, results_directory),
@@ -238,8 +233,17 @@ return function(build_specfication, _, tree)
 
 					results[matched_position.id] = parameterized_tests[test_case_node_name]
 				elseif matched_position ~= nil then
-					local path_to_file = write_systemout_to_file(test_case_node, results_directory)
+					local path_to_file
+					if test_case_node["system-out"] ~= nil then -- essa verificação provavelmente deve ficar dentro de write_systemout_to_file
+						path_to_file = write_systemout_to_file(test_case_node, results_directory) -- escrever também o failure -> failure_node[1]
+					else
+						path_to_file = nil
+					end
+
 					local failure_node = test_case_node.failure
+					if failure_node == nil then
+						failure_node = test_case_node.error
+					end
 					local status = failure_node == nil and STATUS_PASSED or STATUS_FAILED
 					local short_message = (failure_node or {}).message
 					local error = failure_node and parse_error_from_failure_xml(failure_node, position)
@@ -249,11 +253,8 @@ return function(build_specfication, _, tree)
 						short = short_message,
 						errors = { error },
 					}
-					print("matched_position.id: ", matched_position.id)
 					results[matched_position.id] = result
 				end
-
-				-- TODO: What to do here?
 			end
 		end
 	end
