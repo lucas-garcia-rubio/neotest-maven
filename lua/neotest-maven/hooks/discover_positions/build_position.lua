@@ -21,8 +21,6 @@ return function(file_path, source, captured_nodes)
 	local definition = captured_nodes[node_type .. ".definition"]
 	local name = handle_name
 
-	print("handle_name: ", handle_name)
-
 	return {
 		type = node_type,
 		path = file_path,

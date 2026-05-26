@@ -42,6 +42,12 @@ local function asList(value)
 	return (type(value) == "table" and #value > 0) and value or { value }
 end
 
+local function extract_before_parenthesis(input)
+	-- Use pattern matching to find everything before the first '('
+	local result = string.match(input, "^[^%(]+")
+	return result
+end
+
 --- This tries to find the position in the tree that belongs to this test case
 --- result from the JUnit report XML. Therefore it parses the location from the
 --- node attributes and compares it with the position information in the tree.
@@ -50,14 +56,12 @@ end
 --- @param test_case_node table - XML node of test case result
 --- @return table | nil - see neotest.Position
 local function find_position_for_test_case(tree, test_case_node)
-	local function_name = test_case_node._attr.name:gsub("%(%)", "")
+	local function_name_complete = test_case_node._attr.name:gsub("%(%)", "")
+	local function_name = extract_before_parenthesis(function_name_complete)
 	local package_and_class = (test_case_node._attr.classname:gsub("%$", "%."))
 
-	print("function_name: ", function_name)
-	print("package_and_class: ", package_and_class)
-
 	for _, position in tree:iter() do
-		if vim.startswith(function_name, position.name) and vim.startswith(position.id, package_and_class) then
+		if function_name == position.name and vim.startswith(position.id, package_and_class) then
 			return position
 		end
 	end
@@ -77,30 +81,38 @@ local function extract_test_case_basename(test_case_node)
 	return function_name:match("^(.-)%(")
 end
 
+local function find_first_number_after_known_string(input, knownString)
+	-- Find the position of the known string in the input
+	local startPos = string.find(input, knownString)
+
+	-- If the known string is found
+	if startPos then
+		-- Extract the substring that starts right after the known string
+		local remainingSubstring = string.sub(input, startPos + #knownString)
+
+		-- Match the first sequence of digits in the remaining substring
+		local number = string.match(remainingSubstring, "%d+")
+
+		return tonumber(number) - 1
+	end
+
+	-- Return nil if the known string is not found
+	return nil
+end
+
 --- Convert a JUnit failure report into a Neotest error. It parses the failure
 --- message and removes the Exception path from it. Furthermore it tries to parse
 --- the stack trace to find a line number within the executed test case.
 ---
 --- @param failure_node table - XML node of failure report in of a test case
---- @param position table - matched Neotest position of this test case (see neotest.Position)
 --- @return table - see neotest.Error
-local function parse_error_from_failure_xml(failure_node, position)
+local function parse_error_from_failure_xml(failure_node, test_case_node)
 	local type = failure_node._attr.type
 	local message = (failure_node._attr.message:gsub(type .. ".*\n", ""))
 
 	local stack_trace = failure_node[1] or ""
-	local package_name = get_package_name(position.path)
-	local line_number
 
-	for _, line in ipairs(vim.split(stack_trace, "[\r]?\n")) do
-		local pattern = "^.*at.+" .. package_name .. ".*%(.+..+:(%d+)%)$"
-		local match = line:match(pattern)
-
-		if match then
-			line_number = tonumber(match) - 1
-			break
-		end
-	end
+	local line_number = find_first_number_after_known_string(stack_trace, test_case_node._attr.name)
 
 	return { message = message, line = line_number }
 end
@@ -109,7 +121,7 @@ end
 --- @param results_directory string
 --- @return string
 local function write_systemout_to_file(test_case_node, results_directory)
-	local filename = test_case_node["_attr"]["classname"] .. "#" .. test_case_node["_attr"]["name"] .. "-output.txt"
+	local filename = test_case_node["_attr"]["classname"] .. "#" .. test_case_node["_attr"]["name"] .. ".txt"
 	local reports_dir = results_directory:match("([^:]+)")
 	local parent_path = reports_dir:match("(.+)/[^/]+")
 	local neotest_output_files = parent_path .. "/neotest-output"
@@ -120,6 +132,11 @@ local function write_systemout_to_file(test_case_node, results_directory)
 	local file = io.open(path_to_file, "w")
 	if file then
 		file:write(test_case_node["system-out"])
+		if test_case_node.failure ~= nil then
+			print("entrou no failure")
+			file:write("\n\n")
+			file:write(test_case_node.failure[1])
+		end
 		file:close()
 	else
 		print("Error: Could not open file for writing.")
@@ -135,7 +152,7 @@ end
 
 local function write_output_for_parameterized_tests(test_case_node, results_directory)
 	local test_case_node_name = extract_test_case_basename(test_case_node)
-	local filename = test_case_node["_attr"]["classname"] .. "#" .. test_case_node_name .. "-output.txt"
+	local filename = test_case_node["_attr"]["classname"] .. "#" .. test_case_node_name .. ".txt"
 	local reports_dir = results_directory:match("([^:]+)")
 	local parent_path = reports_dir:match("(.+)/[^/]+")
 	local neotest_output_files = parent_path .. "/neotest-output"
@@ -157,7 +174,11 @@ local function write_output_for_parameterized_tests(test_case_node, results_dire
 
 	if file then
 		file:write("Parameter #" .. test_number .. " - Test " .. status .. "\n\n")
-		file:write(test_case_node["system-out"])
+		if test_case_node["system-out"] ~= nil then
+			file:write(test_case_node["system-out"])
+		else
+			file:write("Empty output for: " .. test_case_node._attr.name)
+		end
 		file:write("\n\n")
 		file:close()
 	else
@@ -208,6 +229,7 @@ return function(build_specfication, _, tree)
 				local matched_position = find_position_for_test_case(tree, test_case_node)
 
 				if is_parameterized and matched_position ~= nil then
+					print("entrou no fluxo de parametrizado")
 					local test_case_node_name = extract_test_case_basename(test_case_node)
 					local number = tonumber(get_parameter_number(test_case_node))
 					if number == 1 then
@@ -241,12 +263,12 @@ return function(build_specfication, _, tree)
 					end
 
 					local failure_node = test_case_node.failure
-					if failure_node == nil then
-						failure_node = test_case_node.error
-					end
+					-- if failure_node == nil then
+					-- 	failure_node = test_case_node.error
+					-- end
 					local status = failure_node == nil and STATUS_PASSED or STATUS_FAILED
 					local short_message = (failure_node or {}).message
-					local error = failure_node and parse_error_from_failure_xml(failure_node, position)
+					local error = failure_node and parse_error_from_failure_xml(failure_node, test_case_node)
 					local result = {
 						status = status,
 						output = path_to_file,
